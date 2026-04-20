@@ -58,7 +58,7 @@ class YouTubeBookPipeline:
             # Step 1: Fetch subtitles
             print("📥 STEP 1: Fetching subtitles...")
             print("-" * 50)
-            subtitles = self.fetcher.fetch_subtitles(video_url_or_id, language)
+            subtitles = self.fetcher.fetch_subtitles(video_url_or_id, language, use_demo_data=True)
             results['subtitles_count'] = len(subtitles)
             
             if not subtitles:
@@ -76,7 +76,7 @@ class YouTubeBookPipeline:
             print("-" * 50)
             
             # Check if video exists
-            existing_video = self.db.get_video_by_id(video_id)
+            existing_video = self.db.get_video_by_youtube_id(video_id)
             
             video_data = {
                 'video_id': video_id,

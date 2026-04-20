@@ -74,10 +74,10 @@ class AIContentGenerator:
         Returns:
             Dict with generated post content and metadata
         """
-        content = segment.get('content', '')
-        context_before = segment.get('context_before', '')
-        context_after = segment.get('context_after', '')
-        score = segment.get('score', 0.0)
+        content = segment.content if hasattr(segment, 'content') else segment.get('content', '')
+        context_before = segment.context_before if hasattr(segment, 'context_before') else segment.get('context_before', '')
+        context_after = segment.context_after if hasattr(segment, 'context_after') else segment.get('context_after', '')
+        score = segment.score if hasattr(segment, 'score') else segment.get('score', 0.0)
         
         # Build the prompt
         prompt = self._build_prompt(content, context_before, context_after, video_info)

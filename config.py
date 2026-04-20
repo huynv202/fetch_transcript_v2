@@ -12,6 +12,10 @@ DB_CONFIG = {
     'database': 'treebook'
 }
 
+# Use SQLite for local testing (set to True if MySQL unavailable)
+USE_SQLITE = True
+SQLITE_DB_PATH = 'youtube_books.db'
+
 # AI API Configuration (currently empty - to be filled later)
 AI_CONFIG = {
     'api_key': '',  # OpenAI/Gemini/Claude API key
