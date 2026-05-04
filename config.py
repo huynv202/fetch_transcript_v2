@@ -25,8 +25,8 @@ AI_CONFIG = {
 
 # Processing Configuration
 PROCESSING_CONFIG = {
-    'min_segment_length': 50,  # Minimum characters per segment
-    'max_segment_length': 500,  # Maximum characters per segment
+    'min_segment_length': 400,  # Minimum characters per segment (tăng lên để tạo đoạn dài)
+    'max_segment_length': 600,  # Maximum characters per segment (độ dài mục tiêu ~500 ký tự)
     'context_window': 3,  # Number of sentences to include for context
     'quote_selection_threshold': 0.7,  # Threshold for quote quality scoring
 }
