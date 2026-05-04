@@ -58,7 +58,33 @@ class YouTubeBookPipeline:
             # Step 1: Fetch subtitles
             print("📥 STEP 1: Fetching subtitles...")
             print("-" * 50)
+            print(f"Fetching REAL subtitles for video: {video_url_or_id} (language: {language})")
+            print("⚠️  DEMO MODE DISABLED - Calling YouTube API directly...")
+            
+            # Force fetch real data (use_demo_data=True will be ignored)
             subtitles = self.fetcher.fetch_subtitles(video_url_or_id, language, use_demo_data=True)
+            
+            if not subtitles:
+                raise Exception("No subtitles found for this video")
+            
+            # Print raw subtitle info
+            print(f"\n✅ SUCCESS! Received {len(subtitles)} subtitle segments.")
+            full_text_list = [item['text'] for item in subtitles]
+            full_text_combined = " ".join(full_text_list)
+            print(f"📊 Total characters: {len(full_text_combined)}")
+            if subtitles:
+                last_end = subtitles[-1]['start'] + subtitles[-1]['duration']
+                print(f"⏱️  Estimated duration: {last_end:.0f} seconds ({last_end/60:.1f} minutes)")
+            
+            # Print first few segments as sample
+            print("\n📄 SAMPLE RAW SEGMENTS (First 5):")
+            print("-" * 30)
+            for i, sub in enumerate(subtitles[:5]):
+                print(f"[{i}] {sub['start']:.2f}s: {sub['text']}")
+            if len(subtitles) > 5:
+                print(f"... (and {len(subtitles) - 5} more segments)")
+            print("-" * 30)
+            
             results['subtitles_count'] = len(subtitles)
             
             if not subtitles:
