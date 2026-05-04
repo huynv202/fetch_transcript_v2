@@ -1,6 +1,6 @@
 """
 Main Pipeline for YouTube Book Reader Data Processing
-Orchestrates the entire workflow: fetch subtitles -> segment -> generate posts -> save to DB
+Orchestrates the entire workflow: fetch subtitles -> segment -> save paragraphs -> extract quotes -> save to DB
 """
 
 import argparse
@@ -11,7 +11,7 @@ from config import PROCESSING_CONFIG
 from database import DatabaseManager
 from youtube_fetcher import YouTubeSubtitleFetcher
 from text_segmenter import SmartTextSegmenter
-from ai_generator import AIContentGenerator
+from quote_extractor import QuoteExtractor
 
 
 class YouTubeBookPipeline:
@@ -19,12 +19,12 @@ class YouTubeBookPipeline:
         self.db = DatabaseManager()
         self.fetcher = YouTubeSubtitleFetcher()
         self.segmenter = SmartTextSegmenter()
-        self.generator = AIContentGenerator()
+        self.quote_extractor = QuoteExtractor()
     
     def process_video(self, video_url_or_id: str, 
                      language: str = 'vi',
-                     generate_posts: bool = True,
-                     post_limit: int = 10,
+                     extract_quotes: bool = True,
+                     max_quotes: int = 10,
                      skip_if_exists: bool = False) -> dict:
         """
         Process a YouTube video end-to-end
@@ -32,8 +32,8 @@ class YouTubeBookPipeline:
         Args:
             video_url_or_id: YouTube URL or video ID
             language: Preferred subtitle language
-            generate_posts: Whether to generate AI posts
-            post_limit: Maximum number of posts to generate
+            extract_quotes: Whether to extract quotes using AI
+            max_quotes: Maximum number of quotes to extract
             skip_if_exists: Skip if video already processed
         
         Returns:
@@ -117,32 +117,25 @@ class YouTubeBookPipeline:
             self.db.save_paragraphs(video_db_id, all_paragraphs)
             results['paragraphs_count'] = len(all_paragraphs)
             
-            # Step 4: Generate AI posts (if enabled)
-            if generate_posts:
-                print("\n🤖 STEP 4: Generating AI posts...")
+            # Step 4: Extract quotes from paragraphs using AI (if enabled)
+            if extract_quotes:
+                print("\n🤖 STEP 4: Extracting quotes from paragraphs using AI...")
                 print("-" * 50)
                 
-                # Use best segments for post generation
-                segments_to_process = best_segments if best_segments else segments[:post_limit]
-                
-                posts = self.generator.generate_multiple_posts(
-                    segments_to_process,
+                # Extract quotes from all paragraphs
+                quotes = self.quote_extractor.extract_quotes_from_paragraphs(
+                    all_paragraphs,
                     video_info=video_data,
-                    limit=post_limit
+                    max_quotes_total=max_quotes
                 )
                 
-                # Convert to quote format for database
-                quotes = [
-                    {
-                        'content': post['content'],
-                        'is_visible': post['is_visible']
-                    }
-                    for post in posts
-                ]
-                
                 # Save quotes to database
-                self.db.save_quotes(video_db_id, quotes)
-                results['quotes_count'] = len(quotes)
+                if quotes:
+                    self.db.save_quotes(video_db_id, quotes)
+                    results['quotes_count'] = len(quotes)
+                    print(f"✓ Saved {len(quotes)} quotes to database")
+                else:
+                    print("⚠ No quotes were extracted")
             
             results['success'] = True
             
@@ -165,9 +158,9 @@ class YouTubeBookPipeline:
         
         return results
     
-    def regenerate_posts(self, video_db_id: int, limit: int = 10):
-        """Regenerate AI posts for an existing video"""
-        print(f"\n🔄 Regenerating posts for video DB ID: {video_db_id}")
+    def regenerate_quotes(self, video_db_id: int, max_quotes: int = 10):
+        """Regenerate quotes for an existing video"""
+        print(f"\n🔄 Regenerating quotes for video DB ID: {video_db_id}")
         
         # Get video info
         cursor = self.db.connection.cursor(dictionary=True)
@@ -180,47 +173,33 @@ class YouTubeBookPipeline:
             return
         
         # Get paragraphs
-        paragraphs = self.db.get_paragraphs(video_db_id)
+        cursor = self.db.connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM youtube_paragraphs WHERE youtube_video_id = %s ORDER BY ordinal_number", (video_db_id,))
+        paragraphs = cursor.fetchall()
+        cursor.close()
         
         if not paragraphs:
             print("❌ No paragraphs found for this video")
             return
         
-        # Convert paragraphs back to segment format
-        segments = [
-            {
-                'content': p['content'],
-                'content_raw': p['content_raw'],
-                'context_before': '',
-                'context_after': '',
-                'score': 0.5
-            }
-            for p in paragraphs
-        ]
-        
-        # Generate new posts
+        # Extract new quotes
         video_info = {
             'title': video.get('title', 'Unknown'),
             'channel_title': video.get('channel_title', 'Unknown')
         }
         
-        posts = self.generator.generate_multiple_posts(
-            segments,
+        quotes = self.quote_extractor.extract_quotes_from_paragraphs(
+            paragraphs,
             video_info=video_info,
-            limit=limit
+            max_quotes_total=max_quotes
         )
         
         # Save to database
-        quotes = [
-            {
-                'content': post['content'],
-                'is_visible': post['is_visible']
-            }
-            for post in posts
-        ]
-        
-        self.db.save_quotes(video_db_id, quotes)
-        print(f"✅ Generated {len(quotes)} new posts")
+        if quotes:
+            self.db.save_quotes(video_db_id, quotes)
+            print(f"✅ Generated {len(quotes)} new quotes")
+        else:
+            print("⚠ No quotes were extracted")
     
     def close(self):
         """Clean up resources"""
@@ -235,8 +214,8 @@ def main():
 Examples:
   python main.py --video SYwXwiuxO-0
   python main.py --video https://youtube.com/watch?v=SYwXwiuxO-0 --language vi
-  python main.py --video SYwXwiuxO-0 --no-generate-posts
-  python main.py --video SYwXwiuxO-0 --post-limit 5
+  python main.py --video SYwXwiuxO-0 --no-extract-quotes
+  python main.py --video SYwXwiuxO-0 --max-quotes 5
   python main.py --regenerate --video-db-id 1
         """
     )
@@ -244,14 +223,14 @@ Examples:
     parser.add_argument('--video', type=str, help='YouTube video URL or ID')
     parser.add_argument('--language', type=str, default='vi', 
                        help='Preferred subtitle language (default: vi)')
-    parser.add_argument('--no-generate-posts', action='store_true',
-                       help='Skip AI post generation')
-    parser.add_argument('--post-limit', type=int, default=10,
-                       help='Maximum number of posts to generate (default: 10)')
+    parser.add_argument('--no-extract-quotes', action='store_true',
+                       help='Skip AI quote extraction')
+    parser.add_argument('--max-quotes', type=int, default=10,
+                       help='Maximum number of quotes to extract (default: 10)')
     parser.add_argument('--skip-if-exists', action='store_true',
                        help='Skip processing if video already exists')
     parser.add_argument('--regenerate', action='store_true',
-                       help='Regenerate posts for existing video')
+                       help='Regenerate quotes for existing video')
     parser.add_argument('--video-db-id', type=int,
                        help='Database video ID (for regeneration)')
     
@@ -265,13 +244,13 @@ Examples:
             if not args.video_db_id:
                 print("❌ Error: --video-db-id is required for regeneration")
                 return
-            pipeline.regenerate_posts(args.video_db_id, limit=args.post_limit)
+            pipeline.regenerate_quotes(args.video_db_id, max_quotes=args.max_quotes)
         elif args.video:
             results = pipeline.process_video(
                 video_url_or_id=args.video,
                 language=args.language,
-                generate_posts=not args.no_generate_posts,
-                post_limit=args.post_limit,
+                extract_quotes=not args.no_extract_quotes,
+                max_quotes=args.max_quotes,
                 skip_if_exists=args.skip_if_exists
             )
             
