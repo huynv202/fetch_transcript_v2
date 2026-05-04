@@ -1,29 +1,19 @@
 """
 YouTube Subtitle/Transcript Downloader
-Fetches subtitles from YouTube videos using direct HTTP requests
-Supports cookie-based authentication to bypass IP blocks
+Fetches subtitles from YouTube videos using youtube-transcript-api library
+More reliable than direct HTTP requests for most use cases
 """
 
 import json
 import re
-import requests
 from typing import List, Dict, Optional
-from config import YOUTUBE_CONFIG
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 
 
 class YouTubeSubtitleFetcher:
     def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-        })
-        
-        self.use_cookies = YOUTUBE_CONFIG.get('use_cookies', False)
-        self.cookies_file = YOUTUBE_CONFIG.get('cookies_file', 'cookies.txt')
-        
-        if self.use_cookies:
-            self._load_cookies()
+        self.api = YouTubeTranscriptApi()
 
     def _load_cookies(self):
         """Load cookies from Netscape format file"""
@@ -68,22 +58,25 @@ class YouTubeSubtitleFetcher:
                        language: Optional[str] = None,
                        use_demo_data: bool = False) -> List[Dict]:
         """
-        Fetch subtitles/transcript from a YouTube video
+        Fetch subtitles/transcript from a YouTube video using youtube-transcript-api
         """
+        # FORCE DISABLE DEMO MODE - Always fetch real data from YouTube
         if use_demo_data:
-            print("📝 Using DEMO MODE with sample transcript data...")
-            return self._get_demo_transcript()
-
+            print("⚠️  WARNING: use_demo_data=True ignored. Forcing REAL YouTube API call...")
+        
         video_id = self.extract_video_id(video_url_or_id)
 
+        # Define languages to try
         languages_to_try = []
         if language:
             languages_to_try.append(language)
         else:
-            languages_to_try.append(YOUTUBE_CONFIG['default_language'])
+            languages_to_try.append('vi')
         
-        languages_to_try.extend(YOUTUBE_CONFIG['fallback_languages'])
+        # Add fallback languages
+        languages_to_try.extend(['en', 'vi-auto', 'en-auto'])
         
+        # Remove duplicates while preserving order
         seen = set()
         unique_languages = []
         for lang in languages_to_try:
@@ -94,150 +87,78 @@ class YouTubeSubtitleFetcher:
         print(f"Fetching subtitles for video ID: {video_id}")
         print(f"Trying languages: {unique_languages}")
 
-        try:
-            # Get video page HTML
-            url = f"https://www.youtube.com/watch?v={video_id}"
-            response = self.session.get(url, timeout=15)
-            response.raise_for_status()
-            
-            # Extract player response from HTML
-            player_response = None
-            
-            # Try multiple patterns to find ytInitialPlayerResponse
-            patterns = [
-                r'var\s+ytInitialPlayerResponse\s*=\s*(\{.+?\});',
-                r'ytInitialPlayerResponse\s*=\s*(\{.+?\});',
-            ]
-            
-            for pattern in patterns:
-                for match in re.finditer(pattern, response.text):
-                    try:
-                        json_str = match.group(1)
-                        # Find matching braces
-                        brace_count = 0
-                        start_idx = 0
-                        for i, char in enumerate(json_str):
-                            if char == '{':
-                                if brace_count == 0:
-                                    start_idx = i
-                                brace_count += 1
-                            elif char == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    json_str = json_str[start_idx:i+1]
-                                    break
-                        
-                        player_response = json.loads(json_str)
-                        break
-                    except json.JSONDecodeError:
-                        continue
+        # Try each language
+        for lang_code in unique_languages:
+            try:
+                print(f"  → Trying language: {lang_code}")
                 
-                if player_response:
-                    break
-            
-            if not player_response:
-                raise Exception("Could not extract player response from video page")
-            
-            # Check if video is available
-            playability = player_response.get('playabilityStatus', {})
-            status = playability.get('status', '')
-            
-            if status != 'OK':
-                reason = playability.get('reason', 'Unknown error')
-                raise Exception(f"Video not available: {reason}")
-            
-            # Get caption tracks
-            captions = player_response.get('captions', {})
-            if not captions:
-                raise Exception("No captions found for this video")
-            
-            caption_renderer = captions.get('playerCaptionsTracklistRenderer', {})
-            caption_tracks = caption_renderer.get('captionTracks', [])
-            
-            if not caption_tracks:
-                raise Exception("No caption tracks available")
-            
-            # Find best language track
-            selected_track = None
-            for lang in unique_languages:
-                for track in caption_tracks:
-                    lang_code = track.get('languageCode', '')
-                    if lang_code.startswith(lang):
-                        selected_track = track
-                        print(f"  ✓ Found track for language: {lang_code}")
-                        break
-                if selected_track:
-                    break
-            
-            if not selected_track:
-                # Use first available track
-                selected_track = caption_tracks[0]
-                lang_code = selected_track.get('languageCode', 'unknown')
-                print(f"⚠ Using fallback language: {lang_code}")
-            
-            # Get caption URL
-            caption_url = selected_track.get('baseUrl', '')
-            if not caption_url:
-                raise Exception("No caption URL found")
-            
-            # Add format parameter for JSON response
-            if '&fmt=' not in caption_url:
-                caption_url += '&fmt=json3'
-            
-            # Fetch caption data
-            caption_response = self.session.get(caption_url, timeout=10)
-            caption_response.raise_for_status()
-            
-            caption_data = caption_response.json()
-            
-            # Parse captions
-            subtitles = []
-            events = caption_data.get('events', [])
-            
-            for event in events:
-                if 'segs' not in event:
-                    continue
-                
-                text_parts = []
-                for seg in event.get('segs', []):
-                    utf_text = seg.get('utf8', '')
-                    if utf_text:
-                        text_parts.append(utf_text)
-                
-                if text_parts:
-                    text = ''.join(text_parts)
-                    # Clean up text
-                    text = text.replace('\\n', '\n').replace('&#39;', "'")
-                    text = text.replace('&quot;', '"').replace('&amp;', '&').strip()
+                # Handle auto-generated vs manual captions
+                if '-auto' in lang_code:
+                    base_lang = lang_code.replace('-auto', '')
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
                     
-                    if text:
-                        start_ms = event.get('tStartMs', 0)
-                        duration_ms = event.get('dDurationMs', 0)
-                        
-                        subtitles.append({
-                            'text': text,
-                            'start': start_ms / 1000.0,
-                            'duration': duration_ms / 1000.0
-                        })
-            
-            if subtitles:
-                print(f"✓ Successfully fetched {len(subtitles)} subtitle segments")
-                return subtitles
-            else:
-                raise Exception("No valid subtitle content found")
+                    # Look for auto-generated transcript
+                    try:
+                        transcript = transcript_list.find_manually_created_transcript([base_lang])
+                        print(f"    ✓ Found manual transcript for {base_lang}, using it instead of auto")
+                    except NoTranscriptFound:
+                        try:
+                            transcript = transcript_list.find_generated_transcript([base_lang])
+                            print(f"    ✓ Found auto-generated transcript for {base_lang}")
+                        except NoTranscriptFound:
+                            print(f"    ✗ No transcript found for {base_lang}")
+                            continue
+                else:
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                    try:
+                        # Try manual first
+                        transcript = transcript_list.find_manually_created_transcript([lang_code])
+                        print(f"    ✓ Found manual transcript for {lang_code}")
+                    except NoTranscriptFound:
+                        try:
+                            # Fall back to auto-generated
+                            transcript = transcript_list.find_generated_transcript([lang_code])
+                            print(f"    ✓ Found auto-generated transcript for {lang_code}")
+                        except NoTranscriptFound:
+                            print(f"    ✗ No transcript found for {lang_code}")
+                            continue
                 
-        except requests.exceptions.RequestException as e:
-            print(f"✗ Network error: {e}")
-            raise Exception(f"Network error while fetching subtitles: {e}")
-        except json.JSONDecodeError as e:
-            print(f"✗ JSON parsing error: {e}")
-            raise Exception(f"Error parsing subtitle data: {e}")
-        except Exception as e:
-            print(f"✗ Error: {e}")
-            if use_demo_data:
-                print("📝 Falling back to demo data...")
-                return self._get_demo_transcript()
-            raise
+                # Fetch the actual transcript data
+                transcript_data = transcript.fetch()
+                
+                if transcript_data:
+                    print(f"✓ Successfully fetched {len(transcript_data)} subtitle segments in {lang_code}")
+                    
+                    # Normalize format to match expected structure
+                    normalized = []
+                    for item in transcript_data:
+                        normalized.append({
+                            'text': item['text'],
+                            'start': item['start'],
+                            'duration': item['duration']
+                        })
+                    
+                    return normalized
+                    
+            except TranscriptsDisabled:
+                print(f"  ✗ Transcripts disabled for this video")
+                continue
+            except VideoUnavailable:
+                print(f"  ✗ Video unavailable")
+                continue
+            except Exception as e:
+                print(f"  ✗ Error with {lang_code}: {e}")
+                continue
+        
+        # If all languages fail
+        print("✗ No subtitles found in any language")
+        
+        # Only use demo data if explicitly requested AND all real attempts failed
+        if use_demo_data:
+            print("📝 Falling back to demo data (all real attempts failed)...")
+            return self._get_demo_transcript()
+        
+        return []
 
     def _normalize_subtitles(self, transcript: List) -> List[Dict]:
         """Normalize subtitle format"""
