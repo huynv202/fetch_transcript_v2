@@ -6,18 +6,31 @@ More reliable than direct HTTP requests for most use cases
 
 import json
 import re
+import os
+import requests
 from typing import List, Dict, Optional
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 
 
 class YouTubeSubtitleFetcher:
-    def __init__(self):
-        self.api = YouTubeTranscriptApi()
+    def __init__(self, cookies_file: str = 'cookies.txt'):
+        # YouTubeTranscriptApi is a static class, no need to instantiate
+        self.cookies_file = cookies_file
+        self.session = None
+        if os.path.exists(cookies_file):
+            self._load_cookies()
+        else:
+            print(f"⚠️  Cookie file not found: {cookies_file}")
+            print("   To fetch real subtitles from YouTube on this server, you need to:")
+            print("   1. Export cookies from your browser using 'Get cookies.txt LOCALLY' extension")
+            print("   2. Save as 'cookies.txt' in the project directory")
+            print("   3. Re-run the script")
 
     def _load_cookies(self):
         """Load cookies from Netscape format file"""
         try:
+            self.session = requests.Session()
             with open(self.cookies_file, 'r') as f:
                 for line in f:
                     if line.startswith('#') or not line.strip():

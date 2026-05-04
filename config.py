@@ -13,7 +13,7 @@ DB_CONFIG = {
 }
 
 # Use SQLite for local testing (set to True if MySQL unavailable)
-USE_SQLITE = True  # Changed to True to use SQLite for testing
+USE_SQLITE = False  # Changed to False to use MySQL
 SQLITE_DB_PATH = 'youtube_books.db'
 
 # AI API Configuration (currently empty - to be filled later)
