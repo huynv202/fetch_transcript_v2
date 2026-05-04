@@ -1,12 +1,4 @@
 ```
-*.pyc
-__pycache__/
-*.db
-*.log
-.env
-.env.local
-*.tmp
-*.swp
-.vscode/
-.idea/
+# Database file
+youtube_books.db
 ```
