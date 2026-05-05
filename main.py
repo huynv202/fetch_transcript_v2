@@ -94,6 +94,13 @@ class YouTubeBookPipeline:
             video_id = self.fetcher.extract_video_id(video_url_or_id)
             results['video_id'] = video_id
             
+            # Step 1.5: Save ALL subtitle cues to database
+            print("\n💾 STEP 1.5: Saving all subtitle cues to database...")
+            print("-" * 50)
+            cues_saved = self.db.save_subtitle_cues(video_id, subtitles)
+            print(f"✓ Saved {cues_saved} subtitle cues with timing information")
+            results['subtitle_cues_count'] = cues_saved
+            
             # Get full text for processing
             full_text = self.fetcher.get_full_text(subtitles)
             
@@ -172,6 +179,7 @@ class YouTubeBookPipeline:
             print(f"Video ID: {video_id}")
             print(f"Database ID: {video_db_id}")
             print(f"Subtitles fetched: {results['subtitles_count']} segments")
+            print(f"Subtitle cues saved: {results.get('subtitle_cues_count', 0)}")
             print(f"Paragraphs saved: {results['paragraphs_count']}")
             print(f"Quotes/Posts generated: {results['quotes_count']}")
             print("=" * 70 + "\n")

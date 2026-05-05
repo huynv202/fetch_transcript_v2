@@ -77,10 +77,25 @@ class DatabaseManager:
             )
         ''')
         
+        # Create youtube_subtitle_cues table
+        self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS youtube_subtitle_cues (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                youtube_video_id TEXT NOT NULL,
+                cue_index INTEGER NOT NULL,
+                start_time_seconds DECIMAL(10,3) NOT NULL,
+                end_time_seconds DECIMAL(10,3) NOT NULL,
+                text TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+        ''')
+        
         # Create indexes
         self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_id ON youtube_videos(video_id)')
         self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_paragraph_video ON youtube_paragraphs(youtube_video_id)')
         self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_quote_video ON youtube_quotes(youtube_video_id)')
+        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_cue_video ON youtube_subtitle_cues(youtube_video_id)')
         
         self.connection.commit()
         print(f"✓ SQLite database initialized at {SQLITE_DB_PATH}")
@@ -247,6 +262,74 @@ class DatabaseManager:
             self.connection.commit()
         
         return count
+
+    # ==================== SUBTITLE CUE OPERATIONS ====================
+
+    def save_subtitle_cues(self, video_id: str, cues: List[Dict]) -> int:
+        """Save multiple subtitle cues for a video"""
+        self.ensure_connection()
+        now = datetime.now()
+        count = 0
+        
+        # Delete existing cues for this video
+        if self.use_sqlite:
+            self.cursor.execute("DELETE FROM youtube_subtitle_cues WHERE youtube_video_id = ?", (video_id,))
+        else:
+            self.cursor.execute("DELETE FROM youtube_subtitle_cues WHERE youtube_video_id = %s", (video_id,))
+        
+        for idx, cue in enumerate(cues):
+            if self.use_sqlite:
+                self.cursor.execute("""
+                    INSERT INTO youtube_subtitle_cues 
+                    (youtube_video_id, cue_index, start_time_seconds, end_time_seconds, text, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    video_id, 
+                    idx, 
+                    cue.get('start'), 
+                    cue.get('start') + cue.get('duration'),
+                    cue.get('text'), 
+                    now, 
+                    now
+                ))
+            else:
+                self.cursor.execute("""
+                    INSERT INTO youtube_subtitle_cues 
+                    (youtube_video_id, cue_index, start_time_seconds, end_time_seconds, text, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    video_id, 
+                    idx, 
+                    cue.get('start'), 
+                    cue.get('start') + cue.get('duration'),
+                    cue.get('text'), 
+                    now, 
+                    now
+                ))
+            count += 1
+        
+        if self.use_sqlite:
+            self.connection.commit()
+        else:
+            self.connection.commit()
+        
+        return count
+
+    def get_cues_by_video(self, video_id: str) -> List[Dict]:
+        """Get all subtitle cues for a specific video"""
+        self.ensure_connection()
+        if self.use_sqlite:
+            self.cursor.execute(
+                "SELECT * FROM youtube_subtitle_cues WHERE youtube_video_id = ? ORDER BY cue_index", 
+                (video_id,)
+            )
+            return [dict(row) for row in self.cursor.fetchall()]
+        else:
+            self.cursor.execute(
+                "SELECT * FROM youtube_subtitle_cues WHERE youtube_video_id = %s ORDER BY cue_index", 
+                (video_id,)
+            )
+            return self.cursor.fetchall()
 
     # ==================== QUOTE OPERATIONS ====================
 
